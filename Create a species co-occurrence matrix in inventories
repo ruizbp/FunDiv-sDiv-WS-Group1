@@ -1,1 +1,155 @@
 #please insert code in here
+setwd("H:\\My Documents\\Synthesis_FUNDIV\\Co_OccurrenceMatrix")
+getwd()
+
+#############################################################
+#read data
+#############################################################
+species_name<-read.csv("FunDivEUROPE_species.csv")
+plotdata<-read.csv("FunDivEUROPE_inventories_plot_info.csv")
+
+#############################################################
+#Criteria 1: trees alive in two consecturive inventories
+#############################################################
+treedata<-read.csv("FunDivEUROPE_trees_10cm.csv")
+atdata<-treedata[treedata$treestatus_th==2,]
+
+#Converting plotcode to a character and removing the trailing space:
+trim.trailing <- function (x) sub("\\s+$", "", x)
+atdata$plotcode <- trim.trailing (as.character(atdata$plotcode))
+
+#############################################################
+#Criteria 2: Koeppen zones
+#############################################################
+#join with data: http://koeppen-geiger.vu-wien.ac.at/present.htm
+#reading the data
+legend<-read.csv("Legend.csv")
+Koepen<-read.table("Koeppen_plotcode.txt", sep=",", header=TRUE)
+
+#create a unique dataframe using koepen information
+plotcode<-trim.trailing (as.character(Koepen$plotcode))
+GRIDCODE<-as.factor(Koepen$GRIDCODE)
+koepen<-data.frame(plotcode,GRIDCODE)
+
+#join the information of the legend
+legend$GRIDCODE<-as.factor(legend$GRIDCODE)
+kdata<-merge(koepen,legend,by="GRIDCODE", all.x = TRUE)
+
+#############################################################
+#Criteria 3: plots unmanaged in the second inventory
+#############################################################
+### calculate basal area of cut trees###
+cutdata<-treedata[treedata$treestatus_th==3 | treedata$treestatus_th==5,]
+inv.ba.ha.cut <- aggregate(ba_ha1 ~ plotcode, FUN=sum, data=cutdata)
+inv.ba.ha.cut$plotcode <- trim.trailing(inv.ba.ha.cut$plotcode) # still causing problems!
+names(inv.ba.ha.cut)[2] <- "ba.ha.cut"
+
+# merge the data files, ensuring all records in the first dataset are kept 
+#(at the tree level)
+ddata<-merge(atdata, inv.ba.ha.cut, by=c("plotcode"),all.x = TRUE)
+
+# set any nulls to 0
+ddata$ba.ha.cut[is.na(ddata$ba.ha.cut)] <- 0
+
+# only use those plots that don't have any cut trees
+finaldata<- ddata[ddata$ba.ha.cut==0,]
+
+#rm(list=ls()) 
+
+#############################################################
+#############################################################
+#Calculate matrix of species ocurrence
+#############################################################
+#############################################################
+species<-as.factor(finaldata$speciesid)
+plotcode<-finaldata$plotcode
+baha1<-finaldata$ba_ha1
+
+data <-data.frame(species, plotcode, baha1)
+
+#sum the ba_ha1 for each plot and species
+pa <-aggregate(baha1 ~ plotcode + species, FUN=sum, data=data)
+
+#species id ordered
+sps<-sort(unique(pa[,2]))
+
+#create a matrix for the co-ocurrence
+mat<-data.frame(matrix(0,ncol=length(sps),nrow=length(sps)))
+colnames(mat)<-rownames(mat)<-sps
+
+#Loop to calculate the co-ocurrence
+for(i in 1:length(sps)){
+	#Extract the plotcodes where the species "i" is present
+		celsp<-pa[pa[,2]==sps[i],1]
+	#Indentify the plotcodes that overlap with celsp
+	#i.e. where the species is present 
+	#and calculate the frequency that each species occur with the other
+		coo<-table(pa[pa[,1]%in%celsp,2])
+	#Paste the values in the matrizx
+		mat[rownames(mat)%in%names(coo),colnames(mat)==sps[i]]<-coo
+
+#sacar el nº de celdas monoespecificas
+	#Select the plots where the species "i" is not ocurring
+		sinsp<-pa[pa[,2]!=sps[i],]
+	#Select and count the no. plots where the species i is present with other species
+		mono<-unique(sinsp[sinsp[,1]%in%celsp,1])
+	#Calculate the number of monospecific plots and modify it in the diagonal
+		mat[rownames(mat)==sps[i],colnames(mat)==sps[i]]<-length(celsp)-length(mono)
+	print(i)
+		}
+
+write.table(mat ,"species_coo.txt",row.names = TRUE,col.names = TRUE)
+
+#############################################################
+#############################################################
+#Calculate matrix of species ocurrence
+#############################################################
+#############################################################
+str(pa)
+
+kpa<-na.omit(merge(pa, kdata,by="plotcode"))
+summary(kpa)
+
+##Select koepen zone with more than 1000 plots
+aa<-summary(kpa$Name)
+bb<-as.factor(row.names(as.data.frame(aa[aa>1000])))
+zones=levels(bb)
+
+for (j in 1:length(zones))
+{
+	kk<-kpa[kpa$Name==as.character(zones[j]),]
+	str(kk)
+
+	#sum the ba_ha1 for each plot and species
+	pa <-aggregate(baha1 ~ plotcode + species, FUN=sum, data=kk)
+
+	#species id ordered
+	sps<-sort(factor(unique(pa[,2])))
+	pa$species<-factor(pa$species)
+
+	#create a matrix for the co-ocurrence
+	mat<-data.frame(matrix(0,ncol=length(sps),nrow=length(sps)))
+	colnames(mat)<-rownames(mat)<-sps
+
+	for(i in 1:length(sps)){
+		#Extract the plotcodes where the species "i" is present
+			celsp<-pa[pa[,2]==sps[i],1]
+		#Indentify the plotcodes that overlap with celsp
+		#i.e. where the species is present 
+		#and calculate the frequency that each species occur with the other
+			coo<-table(pa[pa[,1]%in%celsp,2])
+		#Paste the values in the matrizx
+			mat[rownames(mat)%in%names(coo),colnames(mat)==sps[i]]<-coo
+
+		#sacar el nº de celdas monoespecificas
+		#Select the plots where the species "i" is not ocurring
+			sinsp<-pa[pa[,2]!=sps[i],]
+		#Select and count the no. plots where the species i is present with other species
+			mono<-unique(sinsp[sinsp[,1]%in%celsp,1])
+		#Calculate the number of monospecific plots and modify it in the diagonal
+			mat[rownames(mat)==sps[i],colnames(mat)==sps[i]]<-length(celsp)-length(mono)
+				print(i)
+			}
+
+	write.table(mat ,paste(zones[j],"_coo.txt"),row.names = TRUE,col.names = TRUE)
+}
